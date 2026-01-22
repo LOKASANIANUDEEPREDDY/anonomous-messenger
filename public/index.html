@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anonymous Messenger</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔒 Anonymous Messenger</h1>
+            <div class="user-info">
+                <span id="your-id">Your ID: Loading...</span>
+                <span id="user-count" class="user-count">👥 0 users online</span>
+            </div>
+        </header>
+
+        <div class="chat-container">
+            <div id="messages" class="messages"></div>
+            <div id="typing-indicator" class="typing-indicator"></div>
+        </div>
+
+        <div class="input-container">
+            <input 
+                type="text" 
+                id="message-input" 
+                placeholder="Type your message anonymously..." 
+                autocomplete="off"
+                maxlength="500">
+            <button id="send-button">Send</button>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="client.js"></script>
+</body>
+</html>
