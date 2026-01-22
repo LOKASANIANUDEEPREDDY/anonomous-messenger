@@ -7,16 +7,23 @@ const userIdSpan = document.getElementById('your-id');
 const userCountSpan = document.getElementById('user-count');
 const typingIndicator = document.getElementById('typing-indicator');
 const toggleUsersBtn = document.getElementById('toggle-users');
+const toggleRoomsBtn = document.getElementById('toggle-rooms');
 const closeSidebarBtn = document.getElementById('close-sidebar');
+const closeRoomSidebarBtn = document.getElementById('close-room-sidebar');
+const createRoomBtn = document.getElementById('create-room-btn');
 const userSidebar = document.getElementById('user-sidebar');
+const roomSidebar = document.getElementById('room-sidebar');
 const userListDiv = document.getElementById('user-list');
+const roomListDiv = document.getElementById('room-list');
 const chatModeDiv = document.getElementById('chat-mode');
 
 let myAnonymousId = null;
 let mySocketId = null;
 let typingTimeout;
 let currentPrivateChat = null; // { socketId, anonymousId }
+let currentRoom = null; // { roomId, name }
 let allUsers = [];
+let allRooms = [];
 
 // Handle welcome message and get anonymous ID
 socket.on('welcome', (data) => {
@@ -105,10 +112,92 @@ socket.on('left private chat', () => {
     addSystemMessage('Returned to public chat');
 });
 
+// Handle room list updates
+socket.on('room list', (rooms) => {
+    allRooms = rooms;
+    updateRoomList();
+});
+
+// Handle room creation
+socket.on('room created', (data) => {
+    currentRoom = data;
+    messagesDiv.innerHTML = '';
+    chatModeDiv.textContent = `Room: ${data.name}`;
+    chatModeDiv.style.background = 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)';
+    addSystemMessage(`You created the room "${data.name}"`);
+    
+    // Add leave button
+    const leaveBtn = document.createElement('button');
+    leaveBtn.textContent = '← Leave Room';
+    leaveBtn.className = 'leave-private-btn';
+    leaveBtn.onclick = leaveRoom;
+    chatModeDiv.appendChild(leaveBtn);
+});
+
+// Handle join request sent
+socket.on('join request sent', (roomName) => {
+    addSystemMessage(`Join request sent for "${roomName}"`);
+});
+
+// Handle room join request (for room creator)
+socket.on('room join request', (data) => {
+    const accept = confirm(`Anonymous #${data.fromAnonymousId} wants to join "${data.roomName}". Accept?`);
+    if (accept) {
+        socket.emit('accept room join', {
+            roomId: data.roomId,
+            userId: data.from
+        });
+    }
+});
+
+// Handle room joined
+socket.on('room joined', (data) => {
+    currentRoom = data;
+    messagesDiv.innerHTML = '';
+    chatModeDiv.textContent = `Room: ${data.name}`;
+    chatModeDiv.style.background = 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)';
+    addSystemMessage(`Joined room "${data.name}"`);
+    
+    // Add leave button
+    const leaveBtn = document.createElement('button');
+    leaveBtn.textContent = '← Leave Room';
+    leaveBtn.className = 'leave-private-btn';
+    leaveBtn.onclick = leaveRoom;
+    chatModeDiv.appendChild(leaveBtn);
+});
+
+// Handle room messages
+socket.on('room message', (messageData) => {
+    if (currentRoom) {
+        if (messageData.isSystem) {
+            addSystemMessage(messageData.text);
+        } else {
+            addMessage(messageData);
+        }
+    }
+});
+
+// Handle room closed
+socket.on('room closed', () => {
+    if (currentRoom) {
+        addSystemMessage('Room has been closed by the creator');
+        leaveRoom();
+    }
+});
+
+// Handle left room
+socket.on('left room', () => {
+    currentRoom = null;
+    chatModeDiv.textContent = 'Public Chat';
+    chatModeDiv.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+    messagesDiv.innerHTML = '';
+    addSystemMessage('Left the room');
+});
+
 // Handle incoming messages
 socket.on('chat message', (messageData) => {
-    // Only show public messages if we're NOT in a private chat
-    if (!currentPrivateChat) {
+    // Only show public messages if we're NOT in a private chat or room
+    if (!currentPrivateChat && !currentRoom) {
         addMessage(messageData);
     }
 });
@@ -131,6 +220,12 @@ function sendMessage() {
             // Send private message
             socket.emit('private message', {
                 to: currentPrivateChat.with,
+                message: message
+            });
+        } else if (currentRoom) {
+            // Send room message
+            socket.emit('room message', {
+                roomId: currentRoom.roomId,
                 message: message
             });
         } else {
@@ -223,10 +318,34 @@ socket.on('reconnect', () => {
 // Toggle user sidebar
 toggleUsersBtn.addEventListener('click', () => {
     userSidebar.classList.add('active');
+    roomSidebar.classList.remove('active');
 });
 
 closeSidebarBtn.addEventListener('click', () => {
     userSidebar.classList.remove('active');
+});
+
+// Toggle room sidebar
+toggleRoomsBtn.addEventListener('click', () => {
+    roomSidebar.classList.add('active');
+    userSidebar.classList.remove('active');
+});
+
+closeRoomSidebarBtn.addEventListener('click', () => {
+    roomSidebar.classList.remove('active');
+});
+
+// Create room
+createRoomBtn.addEventListener('click', () => {
+    const roomName = prompt('Enter room name:');
+    if (roomName && roomName.trim()) {
+        if (currentPrivateChat || currentRoom) {
+            alert('Leave your current chat/room first');
+            return;
+        }
+        socket.emit('create room', roomName.trim());
+        roomSidebar.classList.remove('active');
+    }
 });
 
 // Update user list display
@@ -291,6 +410,55 @@ function leavePrivateChat() {
         socket.emit('leave private chat', currentPrivateChat.with);
     }
 }
+
+// Update room list display
+function updateRoomList() {
+    roomListDiv.innerHTML = '';
+    
+    if (allRooms.length === 0) {
+        roomListDiv.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No rooms available</p>';
+        return;
+    }
+    
+    allRooms.forEach(room => {
+        const roomItem = document.createElement('div');
+        roomItem.className = 'room-item';
+        
+        roomItem.innerHTML = `
+            <span class="room-name">🏠 ${room.name}</span>
+            <div class="room-info">
+                <span>Creator: Anonymous #${room.creator}</span>
+                <span>👥 ${room.memberCount}</span>
+            </div>
+            <button class="join-room-btn" onclick="requestJoinRoom('${room.roomId}')">
+                Join Room
+            </button>
+        `;
+        
+        roomListDiv.appendChild(roomItem);
+    });
+}
+
+// Request to join room
+function requestJoinRoom(roomId) {
+    if (currentPrivateChat || currentRoom) {
+        alert('Leave your current chat/room first');
+        return;
+    }
+    
+    socket.emit('request join room', { roomId });
+    roomSidebar.classList.remove('active');
+}
+
+// Leave room
+function leaveRoom() {
+    if (currentRoom) {
+        socket.emit('leave room', currentRoom.roomId);
+    }
+}
+
+// Make functions global
+window.requestJoinRoom = requestJoinRoom;
 
 // Make requestPrivateChat global
 window.requestPrivateChat = requestPrivateChat;

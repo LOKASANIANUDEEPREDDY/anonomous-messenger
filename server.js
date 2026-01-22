@@ -15,7 +15,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Store connected users with their anonymous IDs
 const connectedUsers = new Map();
 const privateChats = new Map(); // Track who's in private chat: socketId -> partnerId
+const chatRooms = new Map(); // Track rooms: roomId -> { name, creator, members: Set }
 let userCounter = 1000;
+let roomCounter = 1;
 let autoClearTimer = null;
 let lastMessageTime = null;
 
@@ -59,6 +61,15 @@ io.on('connection', (socket) => {
     inPrivateChat: privateChats.has(socketId)
   }));
   io.emit('user list', userList);
+  
+  // Send room list to new user
+  const roomList = Array.from(chatRooms.entries()).map(([roomId, room]) => ({
+    roomId: roomId,
+    name: room.name,
+    creator: room.creator,
+    memberCount: room.members.size
+  }));
+  socket.emit('room list', roomList);
   
   // Notify others that someone joined
   socket.broadcast.emit('user joined', {
@@ -141,6 +152,158 @@ io.on('connection', (socket) => {
     io.emit('user list', userList);
   });
 
+  // Handle room creation
+  socket.on('create room', (roomName) => {
+    const roomId = `room_${roomCounter++}`;
+    const creatorAnonymousId = connectedUsers.get(socket.id);
+    
+    chatRooms.set(roomId, {
+      name: roomName,
+      creator: socket.id,
+      creatorAnonymousId: creatorAnonymousId,
+      members: new Set([socket.id])
+    });
+    
+    socket.join(roomId);
+    
+    // Notify creator
+    socket.emit('room created', {
+      roomId: roomId,
+      name: roomName
+    });
+    
+    // Broadcast updated room list to everyone
+    const roomList = Array.from(chatRooms.entries()).map(([id, room]) => ({
+      roomId: id,
+      name: room.name,
+      creator: room.creatorAnonymousId,
+      memberCount: room.members.size
+    }));
+    io.emit('room list', roomList);
+    
+    console.log(`Room "${roomName}" created by Anonymous #${creatorAnonymousId}`);
+  });
+
+  // Handle room join request
+  socket.on('request join room', (data) => {
+    const room = chatRooms.get(data.roomId);
+    if (!room) {
+      socket.emit('error', 'Room not found');
+      return;
+    }
+    
+    const requesterAnonymousId = connectedUsers.get(socket.id);
+    
+    // Send request to room creator
+    io.to(room.creator).emit('room join request', {
+      roomId: data.roomId,
+      roomName: room.name,
+      from: socket.id,
+      fromAnonymousId: requesterAnonymousId
+    });
+    
+    socket.emit('join request sent', room.name);
+  });
+
+  // Handle room join accept
+  socket.on('accept room join', (data) => {
+    const room = chatRooms.get(data.roomId);
+    if (!room) return;
+    
+    // Add user to room
+    room.members.add(data.userId);
+    
+    // Add user to socket room
+    const userSocket = io.sockets.sockets.get(data.userId);
+    if (userSocket) {
+      userSocket.join(data.roomId);
+    }
+    
+    const joinerAnonymousId = connectedUsers.get(data.userId);
+    
+    // Notify the user they've been accepted
+    io.to(data.userId).emit('room joined', {
+      roomId: data.roomId,
+      name: room.name
+    });
+    
+    // Notify all room members
+    io.to(data.roomId).emit('room message', {
+      id: Date.now(),
+      text: `Anonymous #${joinerAnonymousId} joined the room`,
+      sender: 'System',
+      timestamp: new Date().toLocaleTimeString(),
+      isSystem: true
+    });
+    
+    // Update room list for everyone
+    const roomList = Array.from(chatRooms.entries()).map(([id, rm]) => ({
+      roomId: id,
+      name: rm.name,
+      creator: rm.creatorAnonymousId,
+      memberCount: rm.members.size
+    }));
+    io.emit('room list', roomList);
+  });
+
+  // Handle room messages
+  socket.on('room message', (data) => {
+    const room = chatRooms.get(data.roomId);
+    if (!room || !room.members.has(socket.id)) {
+      return; // User not in room
+    }
+    
+    const senderAnonymousId = connectedUsers.get(socket.id);
+    const messageData = {
+      id: Date.now(),
+      text: data.message,
+      sender: `Anonymous #${senderAnonymousId}`,
+      timestamp: new Date().toLocaleTimeString(),
+      isRoom: true
+    };
+    
+    // Broadcast to all room members
+    io.to(data.roomId).emit('room message', messageData);
+  });
+
+  // Handle leave room
+  socket.on('leave room', (roomId) => {
+    const room = chatRooms.get(roomId);
+    if (!room) return;
+    
+    const userAnonymousId = connectedUsers.get(socket.id);
+    room.members.delete(socket.id);
+    socket.leave(roomId);
+    
+    // Notify remaining members
+    if (room.members.size > 0) {
+      io.to(roomId).emit('room message', {
+        id: Date.now(),
+        text: `Anonymous #${userAnonymousId} left the room`,
+        sender: 'System',
+        timestamp: new Date().toLocaleTimeString(),
+        isSystem: true
+      });
+    }
+    
+    // If creator left or room is empty, delete room
+    if (socket.id === room.creator || room.members.size === 0) {
+      chatRooms.delete(roomId);
+      io.to(roomId).emit('room closed');
+    }
+    
+    socket.emit('left room');
+    
+    // Update room list
+    const roomList = Array.from(chatRooms.entries()).map(([id, rm]) => ({
+      roomId: id,
+      name: rm.name,
+      creator: rm.creatorAnonymousId,
+      memberCount: rm.members.size
+    }));
+    io.emit('room list', roomList);
+  });
+
   // Handle incoming messages
   socket.on('chat message', (msg) => {
     const userAnonymousId = connectedUsers.get(socket.id);
@@ -185,6 +348,30 @@ io.on('connection', (socket) => {
       privateChats.delete(socket.id);
     }
     
+    // Remove from all rooms
+    chatRooms.forEach((room, roomId) => {
+      if (room.members.has(socket.id)) {
+        room.members.delete(socket.id);
+        
+        // Notify room members
+        if (room.members.size > 0) {
+          io.to(roomId).emit('room message', {
+            id: Date.now(),
+            text: `Anonymous #${userAnonymousId} left the room`,
+            sender: 'System',
+            timestamp: new Date().toLocaleTimeString(),
+            isSystem: true
+          });
+        }
+        
+        // Delete room if creator left or empty
+        if (socket.id === room.creator || room.members.size === 0) {
+          chatRooms.delete(roomId);
+          io.to(roomId).emit('room closed');
+        }
+      }
+    });
+    
     connectedUsers.delete(socket.id);
     
     // Clear messages for all users when someone leaves
@@ -205,6 +392,15 @@ io.on('connection', (socket) => {
       inPrivateChat: privateChats.has(socketId)
     }));
     io.emit('user list', userList);
+    
+    // Send updated room list
+    const roomList = Array.from(chatRooms.entries()).map(([id, room]) => ({
+      roomId: id,
+      name: room.name,
+      creator: room.creatorAnonymousId,
+      memberCount: room.members.size
+    }));
+    io.emit('room list', roomList);
     
     // Stop auto-clear timer if no users left
     if (connectedUsers.size === 0) {
