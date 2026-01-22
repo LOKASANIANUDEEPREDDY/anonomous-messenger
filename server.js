@@ -51,10 +51,64 @@ io.on('connection', (socket) => {
     message: 'Welcome to Anonymous Messenger!'
   });
   
+  // Send updated user list to all clients
+  const userList = Array.from(connectedUsers.entries()).map(([socketId, userId]) => ({
+    socketId: socketId,
+    anonymousId: userId
+  }));
+  io.emit('user list', userList);
+  
   // Notify others that someone joined
   socket.broadcast.emit('user joined', {
     message: 'A new user joined the chat',
     userCount: connectedUsers.size
+  });
+
+  // Handle private chat request
+  socket.on('private chat request', (targetSocketId) => {
+    const requesterAnonymousId = connectedUsers.get(socket.id);
+    io.to(targetSocketId).emit('private chat request', {
+      from: socket.id,
+      fromAnonymousId: requesterAnonymousId
+    });
+  });
+
+  // Handle private chat accept
+  socket.on('private chat accept', (data) => {
+    const accepterAnonymousId = connectedUsers.get(socket.id);
+    // Notify both users
+    socket.emit('private chat started', {
+      with: data.from,
+      withAnonymousId: data.fromAnonymousId
+    });
+    io.to(data.from).emit('private chat started', {
+      with: socket.id,
+      withAnonymousId: accepterAnonymousId
+    });
+  });
+
+  // Handle private messages
+  socket.on('private message', (data) => {
+    const senderAnonymousId = connectedUsers.get(socket.id);
+    const messageData = {
+      id: Date.now(),
+      text: data.message,
+      sender: `Anonymous #${senderAnonymousId}`,
+      timestamp: new Date().toLocaleTimeString()
+    };
+    
+    // Send to recipient
+    io.to(data.to).emit('private message', messageData);
+    // Echo back to sender
+    socket.emit('private message', messageData);
+  });
+
+  // Handle return to public chat
+  socket.on('leave private chat', (targetSocketId) => {
+    socket.emit('left private chat');
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('partner left private chat');
+    }
   });
 
   // Handle incoming messages
@@ -104,6 +158,13 @@ io.on('connection', (socket) => {
     });
     
     io.emit('user count', connectedUsers.size);
+    
+    // Send updated user list to remaining clients
+    const userList = Array.from(connectedUsers.entries()).map(([socketId, userId]) => ({
+      socketId: socketId,
+      anonymousId: userId
+    }));
+    io.emit('user list', userList);
     
     // Stop auto-clear timer if no users left
     if (connectedUsers.size === 0) {

@@ -13,10 +13,23 @@
             <div class="user-info">
                 <span id="your-id">Your ID: Loading...</span>
                 <span id="user-count" class="user-count">👥 0 users online</span>
+                <button id="toggle-users" class="toggle-users-btn">👥 Users</button>
             </div>
         </header>
 
+        <!-- User List Sidebar -->
+        <div id="user-sidebar" class="user-sidebar">
+            <div class="sidebar-header">
+                <h3>Active Users</h3>
+                <button id="close-sidebar" class="close-btn">✕</button>
+            </div>
+            <div id="user-list" class="user-list">
+                <!-- Users will be populated here -->
+            </div>
+        </div>
+
         <div class="chat-container">
+            <div id="chat-mode" class="chat-mode">Public Chat</div>
             <div id="messages" class="messages"></div>
             <div id="typing-indicator" class="typing-indicator"></div>
         </div>
