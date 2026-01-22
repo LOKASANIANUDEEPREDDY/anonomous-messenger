@@ -15,10 +15,24 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Store connected users with their anonymous IDs
 const connectedUsers = new Map();
 let userCounter = 1000;
+let autoClearTimer = null;
+let lastMessageTime = null;
 
 // Generate random anonymous user ID
 function generateAnonymousId() {
   return Math.floor(Math.random() * 9000) + 1000;
+}
+
+// Auto-clear messages every 5 minutes
+function startAutoClearTimer() {
+  if (autoClearTimer) {
+    clearInterval(autoClearTimer);
+  }
+  
+  autoClearTimer = setInterval(() => {
+    console.log('Auto-clearing messages (5 minute interval)');
+    io.emit('clear messages');
+  }, 5 * 60 * 1000); // 5 minutes
 }
 
 io.on('connection', (socket) => {
@@ -53,6 +67,13 @@ io.on('connection', (socket) => {
       timestamp: new Date().toLocaleTimeString()
     };
     
+    // Start auto-clear timer on first message
+    if (!lastMessageTime) {
+      lastMessageTime = Date.now();
+      startAutoClearTimer();
+      console.log('Started auto-clear timer (5 minutes)');
+    }
+    
     // Broadcast message to all clients including sender
     io.emit('chat message', messageData);
   });
@@ -73,6 +94,9 @@ io.on('connection', (socket) => {
     
     connectedUsers.delete(socket.id);
     
+    // Clear messages for all users when someone leaves
+    io.emit('clear messages');
+    
     // Notify others that someone left
     io.emit('user left', {
       message: 'A user left the chat',
@@ -80,6 +104,16 @@ io.on('connection', (socket) => {
     });
     
     io.emit('user count', connectedUsers.size);
+    
+    // Stop auto-clear timer if no users left
+    if (connectedUsers.size === 0) {
+      if (autoClearTimer) {
+        clearInterval(autoClearTimer);
+        autoClearTimer = null;
+        lastMessageTime = null;
+        console.log('Stopped auto-clear timer (no users)');
+      }
+    }
   });
 });
 

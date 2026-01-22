@@ -34,6 +34,12 @@ socket.on('user left', (data) => {
     addSystemMessage(data.message);
 });
 
+// Handle clear messages
+socket.on('clear messages', () => {
+    messagesDiv.innerHTML = '';
+    addSystemMessage('Messages cleared');
+});
+
 // Handle incoming messages
 socket.on('chat message', (messageData) => {
     addMessage(messageData);
