@@ -82,6 +82,7 @@ socket.on('private chat started', (data) => {
 
 // Handle private messages
 socket.on('private message', (messageData) => {
+    // Only show private messages if we're IN a private chat
     if (currentPrivateChat) {
         addMessage(messageData);
     }
@@ -106,7 +107,10 @@ socket.on('left private chat', () => {
 
 // Handle incoming messages
 socket.on('chat message', (messageData) => {
-    addMessage(messageData);
+    // Only show public messages if we're NOT in a private chat
+    if (!currentPrivateChat) {
+        addMessage(messageData);
+    }
 });
 
 // Handle typing indicator
@@ -240,12 +244,22 @@ function updateUserList() {
                 <span class="user-badge">YOU</span>
             `;
         } else {
-            userItem.innerHTML = `
-                <span class="user-name">Anonymous #${user.anonymousId}</span>
-                <button class="chat-btn" onclick="requestPrivateChat('${user.socketId}', ${user.anonymousId})">
-                    💬 Chat
-                </button>
-            `;
+            if (user.inPrivateChat) {
+                // User is in private chat - show status
+                userItem.classList.add('in-private');
+                userItem.innerHTML = `
+                    <span class="user-name">Anonymous #${user.anonymousId}</span>
+                    <span class="private-badge">🔒 In Private Chat</span>
+                `;
+            } else {
+                // User is available
+                userItem.innerHTML = `
+                    <span class="user-name">Anonymous #${user.anonymousId}</span>
+                    <button class="chat-btn" onclick="requestPrivateChat('${user.socketId}', ${user.anonymousId})">
+                        💬 Chat
+                    </button>
+                `;
+            }
         }
         
         userListDiv.appendChild(userItem);
@@ -256,6 +270,13 @@ function updateUserList() {
 function requestPrivateChat(socketId, anonymousId) {
     if (currentPrivateChat) {
         alert('You are already in a private chat. Leave it first.');
+        return;
+    }
+    
+    // Check if target user is already in a private chat
+    const targetUser = allUsers.find(u => u.socketId === socketId);
+    if (targetUser && targetUser.inPrivateChat) {
+        alert(`Anonymous #${anonymousId} is already in a private chat.`);
         return;
     }
     

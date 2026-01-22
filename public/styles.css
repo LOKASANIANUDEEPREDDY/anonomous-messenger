@@ -201,6 +201,17 @@ header h1 {
     border: 2px solid #667eea;
 }
 
+.user-item.in-private {
+    background: linear-gradient(135deg, rgba(240, 147, 251, 0.1) 0%, rgba(245, 87, 108, 0.1) 100%);
+    border: 2px solid #f093fb;
+    cursor: default;
+}
+
+.user-item.in-private:hover {
+    transform: none;
+    background: linear-gradient(135deg, rgba(240, 147, 251, 0.1) 0%, rgba(245, 87, 108, 0.1) 100%);
+}
+
 .user-name {
     font-weight: 600;
     color: #333;
@@ -208,6 +219,15 @@ header h1 {
 
 .user-badge {
     background: #667eea;
+    color: white;
+    padding: 3px 8px;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.private-badge {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
     color: white;
     padding: 3px 8px;
     border-radius: 5px;
